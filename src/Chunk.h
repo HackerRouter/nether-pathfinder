@@ -83,11 +83,8 @@ enum class Dimension {
     Overworld
     ,Nether
     ,End
+    ,Generic
 };
-
-inline int dimensionHeight(Dimension dim) {
-    return dim == Dimension::Overworld ? 384 : 256;
-}
 
 struct Chunk {
     std::array<x16_t, 24> data;

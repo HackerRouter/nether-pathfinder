@@ -444,7 +444,7 @@ RaytraceResult raytrace(Context& ctx, const Vec3& from, const Vec3& to, FakeChun
     }
 }
 
-size_t lastVisibleNode(Context& ctx, const std::vector<BlockPos>& path, size_t currentNode) {
+size_t lastVisibleNode(Context& ctx, const std::vector<BlockPos>& path, size_t currentNode, FakeChunkMode fakeChunkMode) {
     if (currentNode == path.size() - 1) return currentNode;
     const BlockPos fromBlock = path[currentNode];
     const Vec3 from = blockPosToVec(fromBlock);
@@ -452,7 +452,7 @@ size_t lastVisibleNode(Context& ctx, const std::vector<BlockPos>& path, size_t c
     for (auto i = lastVisible + 1; i < path.size(); i++) {
         const auto& currentBlock = path[i];
         if (fromBlock == currentBlock) continue; // apparently the pathfinder can produce 2 consecutive equal points and that breaks the raytracer
-        const auto result = raytrace(ctx, from, blockPosToVec(currentBlock), FakeChunkMode::GENERATE);
+        const auto result = raytrace(ctx, from, blockPosToVec(currentBlock), fakeChunkMode);
         if (std::holds_alternative<Hit>(result)) {
             return lastVisible;
         }
@@ -461,9 +461,9 @@ size_t lastVisibleNode(Context& ctx, const std::vector<BlockPos>& path, size_t c
     return lastVisible;
 }
 
-std::vector<BlockPos> refine(Context& ctx, const std::vector<BlockPos>& path) {
+std::vector<BlockPos> refine(Context& ctx, const std::vector<BlockPos>& path, FakeChunkMode fakeChunkMode) {
     std::vector<BlockPos> out;
-    for (size_t i = 0; i < path.size(); i = lastVisibleNode(ctx, path, i)) {
+    for (size_t i = 0; i < path.size(); i = lastVisibleNode(ctx, path, i, fakeChunkMode)) {
         out.push_back(path[i]);
         if (i == path.size() - 1) break;
     }

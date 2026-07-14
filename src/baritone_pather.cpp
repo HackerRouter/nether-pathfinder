@@ -54,10 +54,14 @@ int main(int argc, const char** argv) {
             parseInt(argv[5])
     };
 
-    Context ctx{0, std::string{cache}, Dimension::Nether};
+    Context ctx{0, std::string{cache}, Dimension::Nether, 128, true};
     auto realStart = findAir<Size::X4>(ctx, start);
     auto realGoal = findAir<Size::X4>(ctx, end);
-    std::optional<Path> path = findPathFull(ctx, realStart, realGoal, 10000).value();
+    if (!realStart || !realGoal) {
+        std::cerr << "failed to find air at the start or goal" << std::endl;
+        return 1;
+    }
+    std::optional<Path> path = findPathFull(ctx, *realStart, *realGoal, 10000);
     if (!path.has_value()) {
         std::cerr << "failed to find path" << std::endl;
         return 1;

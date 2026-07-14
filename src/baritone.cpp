@@ -88,6 +88,8 @@ void parseBaritoneRegion(Allocator<Chunk>& allocator, cache_t& cache, RegionPos 
                             static constexpr size_t chunkSize = (2 * 16 * 16 * 256) / 8;
                             parseAndInsertChunk(allocator, cache, x + 32 * regionPos.x, z + 32 * regionPos.z, 256, decomp<chunkSize>(data));
                             break;
+                        case Dimension::Generic:
+                            throw std::range_error{"generic dimensions do not have a legacy Baritone cache format"};
                     }
                 }
             }

@@ -1,6 +1,26 @@
 # Nether Pathfinder
 High performance pathfinder for Minecraft's nether dimension, useful for travelling by elytra.
 
+## Dimension and height model
+
+Pathfinder contexts can represent the Overworld, Nether, End, or a generic dimension. The native
+octree currently has capacity for at most 384 blocks of vertical height. Public JNI pathfinding and
+raytrace methods use Minecraft world Y coordinates, while inserted chunk arrays and direct `Octree`
+access use normalized Y coordinates in `[0, height)`:
+
+```text
+internalY = worldY - minY
+worldY    = internalY + minY
+```
+
+For example, create a modern Overworld context with `minY = -64` and `height = 384`. The bundled
+terrain generator only models the legacy Nether. Missing generated chunks in every other dimension
+are therefore treated as solid; callers should normally provide observed chunks or use the explicit
+air/solid cache-miss modes while incrementally replanning.
+
+During development, an unpackaged native library can be loaded with
+`-Dnether.pathfinder.library=/absolute/path/to/the/library`.
+
 This repo is the core library for pathfinding thus is not useful on its own. See [Baritone's elytra branch](https://github.com/cabaletta/baritone/tree/elytra) or [nether-pathfinder-mod](https://github.com/babbaj/nether-pathfinder-mod) for integration inside of a forge mod.
 
 # Building

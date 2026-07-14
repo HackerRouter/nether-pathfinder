@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 project(nether_pathfinder)
 
-find_package(JNI COMPONENTS JNI_INCLUDE_DIRS)
+find_package(JNI REQUIRED)
 include_directories(${JNI_INCLUDE_DIRS})
 
 find_package(PkgConfig) # not required
@@ -40,6 +40,12 @@ else()
 endif()
 target_include_directories(nether_pathfinder PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/zlib-ng)
 target_link_libraries(nether_pathfinder PRIVATE zlibstatic)
+
+# JNI libraries are extracted to a temporary directory at runtime. A MinGW build
+# therefore cannot rely on the target machine having the MinGW runtime DLLs on PATH.
+if (MINGW AND NOT TESTING)
+    target_link_options(nether_pathfinder PRIVATE -static -static-libgcc -static-libstdc++)
+endif()
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     message(WARNING "gcc is not recommended")

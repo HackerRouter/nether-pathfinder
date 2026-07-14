@@ -16,17 +16,42 @@ public class NetherPathfinder {
     // How the raytracer will treat chunks that aren't actually observed.
     // When chunk generation is used the caller must synchronize calls that read from the cache with calls that may mutate the cache.
     // No synchronization is done within the jni code
-    public static int CACHE_MISS_GENERATE = 0;
-    public static int CACHE_MISS_AIR = 1;
-    public static int CACHE_MISS_SOLID = 2;
+    public static final int CACHE_MISS_GENERATE = 0;
+    public static final int CACHE_MISS_AIR = 1;
+    public static final int CACHE_MISS_SOLID = 2;
 
-    public static int DIMENSION_OVERWORLD = 0;
-    public static int DIMENSION_NETHER = 1;
-    public static int DIMENSION_END = 2;
+    public static final int DIMENSION_OVERWORLD = 0;
+    public static final int DIMENSION_NETHER = 1;
+    public static final int DIMENSION_END = 2;
+    public static final int DIMENSION_GENERIC = 3;
 
     // pass true to use the custom chunk allocator that will reduce memory usage and maybe be faster. false to just use new/delete
     // this is only supported on systems with 4k pages
-    public static native long newContext(long seed, String baritoneCacheDirCanBeNull, int dimension, int maxHeight, boolean allocator);
+    private static native long newContext0(long seed, String baritoneCacheDirCanBeNull, int dimension, int minY, int height, boolean allocator);
+
+    /**
+     * Creates a context whose public path and raytrace coordinates use Minecraft world Y coordinates.
+     * Chunk arrays and direct {@link Octree} access remain normalized to {@code [0, height)}.
+     */
+    public static long newContext(long seed, String baritoneCacheDirCanBeNull, int dimension, int minY, int height, boolean allocator) {
+        if (dimension < DIMENSION_OVERWORLD || dimension > DIMENSION_GENERIC) {
+            throw new IllegalArgumentException("Invalid dimension kind: " + dimension);
+        }
+        if (height <= 0 || height > 384) {
+            throw new IllegalArgumentException("Height must be between 1 and 384: " + height);
+        }
+        return newContext0(seed, baritoneCacheDirCanBeNull, dimension, minY, height, allocator);
+    }
+
+    /**
+     * Compatibility overload for callers using the old zero-based height API.
+     */
+    public static long newContext(long seed, String baritoneCacheDirCanBeNull, int dimension, int height, boolean allocator) {
+        return newContext(seed, baritoneCacheDirCanBeNull, dimension, 0, height, allocator);
+    }
+
+    public static native int getMinY(long pointer);
+    public static native int getHeight(long pointer);
     public static native void freeContext(long pointer);
 
     /*
@@ -38,6 +63,10 @@ public class NetherPathfinder {
 
     chunkX and chunkZ are chunk coords, not block coords.
     */
+    /**
+     * Inserts exactly {@code 16 * 16 * getHeight(context)} entries. The array Y coordinate is normalized:
+     * index Y zero represents the context's minimum world Y.
+     */
     public static native void insertChunkData(long context, int chunkX, int chunkZ, boolean[] data);
 
     public static native long allocateAndInsertChunk(long context, int x, int z);
@@ -143,6 +172,12 @@ public class NetherPathfinder {
     }
 
     private static void tryLoadLibrary() throws IOException {
+        final String developmentLibrary = System.getProperty("nether.pathfinder.library");
+        if (developmentLibrary != null && !developmentLibrary.isEmpty()) {
+            System.load(Paths.get(developmentLibrary).toAbsolutePath().normalize().toString());
+            return;
+        }
+
         final String libName = getNativeLibName();
         final byte[] libBytes = getNativeLib(libName);
 

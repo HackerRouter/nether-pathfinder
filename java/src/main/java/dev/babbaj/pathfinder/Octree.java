@@ -59,8 +59,18 @@ public class Octree {
         return chunk + offset;
     }
 
+    private static void checkCoordinates(long pointer, int x, int y, int z) {
+        if (pointer == 0) {
+            throw new IllegalArgumentException("Null native chunk pointer");
+        }
+        if (x < 0 || x >= 16 || z < 0 || z >= 16 || y < 0 || y >= 384) {
+            throw new IndexOutOfBoundsException("Octree coordinates out of range: " + x + "," + y + "," + z);
+        }
+    }
+
     // must be chunk relative coords
     public static void setBlock(long pointer, int x, int y, int z, boolean solid) {
+        checkCoordinates(pointer, x, y, z);
         final long x2Ptr = getX2Ptr(pointer, x, y, z);
         final int bit = bitIndex(x, y, z);
         byte x2 = UNSAFE.getByte(x2Ptr);
@@ -74,6 +84,7 @@ public class Octree {
     }
 
     public static void initBlock(long pointer, int x, int y, int z, boolean solid) {
+        checkCoordinates(pointer, x, y, z);
         final long x2Ptr = getX2Ptr(pointer, x, y, z);
         final int bit = bitIndex(x, y, z);
         byte x2 = UNSAFE.getByte(x2Ptr);
@@ -86,6 +97,7 @@ public class Octree {
     }
 
     public static boolean getBlock(long pointer, int x, int y, int z) {
+        checkCoordinates(pointer, x, y, z);
         final long x2Ptr = getX2Ptr(pointer, x, y, z);
         final int bit = bitIndex(x, y, z);
         final byte x2 = UNSAFE.getByte(x2Ptr);

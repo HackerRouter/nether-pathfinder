@@ -3,6 +3,7 @@
 #include <fstream>
 #include <cstring>
 #include <bitset>
+#include <cassert>
 
 #include "ChunkGeneratorHell.h"
 #include "PathFinder.h"
@@ -116,7 +117,47 @@ void printSizes(const Path& path) {
 
 }
 
+int runSelfTests() {
+    Chunk chunk{};
+    constexpr std::array<int, 6> TEST_HEIGHTS{0, 15, 127, 128, 319, 383};
+    for (int y : TEST_HEIGHTS) {
+        chunk.setBlock(3, y, 7, true);
+        assert(chunk.isSolid(3, y, 7));
+        chunk.setBlock(3, y, 7, false);
+        assert(!chunk.isSolid(3, y, 7));
+    }
+
+    Context ctx{0, Dimension::Generic, -64, 384, false};
+    assert(ctx.minY == -64);
+    assert(ctx.height == 384);
+    assert(ctx.containsWorldY(-64));
+    assert(ctx.containsWorldY(319));
+    assert(!ctx.containsWorldY(-65));
+    assert(!ctx.containsWorldY(320));
+    assert(ctx.toInternalY(-64) == 0);
+    assert(ctx.toInternalY(319) == 383);
+    assert(ctx.toWorldY(0) == -64);
+    assert(ctx.toWorldY(383) == 319);
+    assert(!findAir<Size::X4>(ctx, {0, -1, 0}, FakeChunkMode::SOLID));
+    assert(!findAir<Size::X4>(ctx, {0, 384, 0}, FakeChunkMode::SOLID));
+
+    Chunk* loaded = ctx.chunkAllocator->allocate();
+    *loaded = Chunk{};
+    ctx.chunkCache.emplace(ChunkPos{0, 0}, std::pair{ChunkState::FROM_JAVA, loaded});
+    const auto start = findAir<Size::X4>(ctx, {0, 64, 0}, FakeChunkMode::SOLID);
+    const auto goal = findAir<Size::X4>(ctx, {8, 64, 8}, FakeChunkMode::SOLID);
+    assert(start && goal);
+    const auto path = findPathSegment(ctx, *start, *goal, true, 1000, true, 1.0);
+    assert(path && path->type == Path::Type::FINISHED);
+
+    std::cout << "self-tests passed" << std::endl;
+    return 0;
+}
+
 int main(int argc, char** argv) {
+    if (argc == 2 && std::strcmp(argv[1], "--self-test") == 0) {
+        return runSelfTests();
+    }
     constexpr auto seed = 146008555100680;
 
     [[maybe_unused]] constexpr BlockPos ONE_MIL = {1000072, 64, -121};
@@ -136,8 +177,11 @@ int main(int argc, char** argv) {
     auto t1 = std::chrono::steady_clock::now();
     auto realStart = findAir<Size::X4>(ctx, {0, 50, 0});
     auto realGoal = findAir<Size::X4>(ctx, ONE_HUNDRED_K);
-    //std::optional<Path> path = findPathSegment(ctx, realStart, realGoal, true, 10000, true).value();
-    std::optional<Path> path = findPathFull(ctx, realStart, realGoal, 1).value();
+    if (!realStart || !realGoal) {
+        std::cerr << "failed to find air at the start or goal" << std::endl;
+        return 1;
+    }
+    std::optional<Path> path = findPathFull(ctx, *realStart, *realGoal, 1);
     auto t2 = std::chrono::steady_clock::now();
 
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();

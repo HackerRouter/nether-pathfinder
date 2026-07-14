@@ -109,6 +109,40 @@ tasks.register('compressNatives', XZCompress) {
     input = tasks.joinNatives.output
 }
 
+// Fast local Windows package for development. The release build above still
+// cross-compiles every supported platform; this task embeds only x86_64 Windows.
+tasks.register('prepareLocalWindowsNative', Copy) {
+    def localDll = providers.gradleProperty('local_windows_native')
+            .orElse('../build-windows/libnether_pathfinder.dll')
+    from(localDll)
+    into(temporaryDir)
+    rename { 'nether_pathfinder-x86_64.dll' }
+}
+
+tasks.register('joinLocalWindowsNative', ZipFilesNoCompress) {
+    dependsOn prepareLocalWindowsNative
+    inputFiles = fileTree(tasks.prepareLocalWindowsNative.temporaryDir).matching {
+        include '*.dll'
+    }
+}
+
+tasks.register('compressLocalWindowsNative', XZCompress) {
+    dependsOn joinLocalWindowsNative
+    input = tasks.joinLocalWindowsNative.output
+}
+
+tasks.register('localWindowsJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    dependsOn compressLocalWindowsNative
+    archiveClassifier = 'windows'
+    from sourceSets.main.output
+    configurations = [project.configurations.runtimeClasspath]
+    relocate 'org.tukaani.xz', 'dev.babbaj.pathfinder.org.tukaani.xz'
+    into('') {
+        from tasks.compressLocalWindowsNative.output
+        rename { 'natives.zip.xz' }
+    }
+}
+
 tasks.shadowJar.configure {
     dependsOn compressNatives
     into('') {
@@ -151,6 +185,14 @@ tasks.build.dependsOn tasks.proguardJar
 
 publishing {
     publications {
+        localWindows(MavenPublication) {
+            groupId = 'dev.babbaj'
+            artifactId = 'nether-pathfinder'
+            version = '1.6-windows'
+            artifact(localWindowsJar) {
+                classifier = null
+            }
+        }
         maven(MavenPublication) {
             groupId = 'dev.babbaj'
             artifactId = 'nether-pathfinder'
@@ -160,6 +202,10 @@ publishing {
     }
 
     repositories {
+        maven {
+            name = "LocalBuild"
+            url = layout.buildDirectory.dir('local-maven')
+        }
         //mavenLocal()
         maven {
             name = "FileSystem"

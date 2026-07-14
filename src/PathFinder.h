@@ -47,15 +47,18 @@ struct Context {
     std::array<ChunkGenExec, 4> executors;
     std::atomic_flag cancelFlag;
     std::unordered_set<RegionPos> checkedRegions;
-    int maxHeight;
+    // All native pathfinding coordinates are normalized to [0, height).
+    // minY is only used at the JNI boundary to translate Minecraft world coordinates.
+    int minY;
+    int height;
     Dimension dimension;
 
 
-    explicit Context(int64_t seed, std::optional<std::string>&& cacheDir, Dimension dim, int maxHeight, bool pageAllocator):
-        generator(ChunkGeneratorHell::fromSeed(seed)), baritoneCache(cacheDir), maxHeight(maxHeight), dimension(dim)
+    explicit Context(int64_t seed, std::optional<std::string>&& cacheDir, Dimension dim, int minY, int height, bool pageAllocator):
+        generator(ChunkGeneratorHell::fromSeed(seed)), baritoneCache(cacheDir), minY(minY), height(height), dimension(dim)
         {
-            if (maxHeight <= 0 || maxHeight > 384) {
-                throw std::range_error("bad max height");
+            if (height <= 0 || height > 384) {
+                throw std::range_error("bad world height");
             }
             if (pageAllocator && getPageSize() == 4096) {
                 chunkAllocator = std::make_unique<PageAllocator<Chunk>>();
@@ -63,8 +66,28 @@ struct Context {
                 chunkAllocator = std::make_unique<Allocator<Chunk>>();
             }
         }
-    explicit Context(int64_t seed, Dimension dim, int maxHeight, bool pageAllocator): Context(seed, std::nullopt, dim, maxHeight, pageAllocator) {}
-    explicit Context(int64_t seed, std::string&& cacheDir, Dimension dim, int maxHeight, bool pageAllocator): Context(seed, std::optional{cacheDir}, dim, maxHeight, pageAllocator) {}
+    explicit Context(int64_t seed, Dimension dim, int minY, int height, bool pageAllocator): Context(seed, std::nullopt, dim, minY, height, pageAllocator) {}
+    explicit Context(int64_t seed, std::string&& cacheDir, Dimension dim, int minY, int height, bool pageAllocator): Context(seed, std::optional{cacheDir}, dim, minY, height, pageAllocator) {}
+
+    // Source compatibility for native callers that used the pre-minY API.
+    explicit Context(int64_t seed, Dimension dim, int height, bool pageAllocator): Context(seed, dim, 0, height, pageAllocator) {}
+    explicit Context(int64_t seed, std::string&& cacheDir, Dimension dim, int height, bool pageAllocator): Context(seed, std::move(cacheDir), dim, 0, height, pageAllocator) {}
+
+    [[nodiscard]] bool containsWorldY(double worldY) const {
+        return worldY >= minY && worldY < static_cast<double>(minY) + height;
+    }
+
+    [[nodiscard]] int toInternalY(int worldY) const {
+        return worldY - minY;
+    }
+
+    [[nodiscard]] double toInternalY(double worldY) const {
+        return worldY - minY;
+    }
+
+    [[nodiscard]] int toWorldY(int internalY) const {
+        return internalY + minY;
+    }
     ~Context() {
         // useless optimization
         if (!chunkAllocator->auto_frees_on_destroy()) {
@@ -88,4 +111,4 @@ std::optional<Path> findPathFull(Context& ctx, const NodePos& start, const NodeP
 std::optional<Path> findPathSegment(Context& ctx, const NodePos& start, const NodePos& goal, bool x4Min, int failTimeoutMs, bool airIfFake, double fakeChunkCost);
 
 template<Size size>
-NodePos findAir(Context& ctx, const BlockPos& start1x);
+std::optional<NodePos> findAir(Context& ctx, const BlockPos& start1x, FakeChunkMode fakeChunkMode = FakeChunkMode::GENERATE);

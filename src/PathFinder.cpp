@@ -60,6 +60,9 @@ Path createPath(map_t<NodePos, std::unique_ptr<PathNode>>& map, const PathNode* 
 
 const Chunk& getRealChunkFromCacheOrFakeChunkMaybeGen(Context& ctx, ChunkGenExec& executor, const ChunkPos& pos, FakeChunkMode mode) {
     if (mode == FakeChunkMode::GENERATE) {
+        // The bundled generator is the legacy Nether generator. Treat missing chunks in every
+        // other dimension as solid instead of silently inventing Nether terrain.
+        if (ctx.dimension != Dimension::Nether) return SOLID_CHUNK;
         return getOrGenChunk(ctx, executor, pos);
     }
     return getRealChunkOrDefault(ctx, pos, mode == FakeChunkMode::SOLID);
@@ -283,8 +286,6 @@ std::chrono::milliseconds tryLoadRegionNative(Context& ctx, ChunkPos pos) {
     return {};
 }
 
-std::atomic_flag cancelFlag;
-
 std::optional<Path> findPathSegment(Context& ctx, const NodePos& start, const NodePos& goal, bool x4Min, int timeoutMs, bool airIfFake, double fakeChunkCost) {
     const auto fakeChunkMode = airIfFake ? FakeChunkMode::AIR : FakeChunkMode::GENERATE;
     const auto goalCenter = goal.absolutePosCenter();
@@ -322,7 +323,7 @@ std::optional<Path> findPathSegment(Context& ctx, const NodePos& start, const No
 
             if (now >= failureTimeout || (!failing && now >= primaryTimeoutTime)) {
                 break;
-            } else if (cancelFlag.test()) {
+            } else if (ctx.cancelFlag.test()) {
                 return {};
             }
         }
@@ -408,7 +409,7 @@ std::optional<Path> findPathSegment(Context& ctx, const NodePos& start, const No
                 const NodePos neighborNodePos{size, bpos.offset(face, width(size))};
                 const BlockPos origin = neighborNodePos.absolutePosZero();
                 if constexpr (face == Face::UP || face == Face::DOWN) {
-                    if (!isInBounds(ctx.maxHeight, origin)) return;
+                    if (!isInBounds(ctx.height, origin)) return;
                 }
                 const ChunkPos neighborCpos = origin.toChunkPos();
                 timeDoingIO += tryLoadRegionNative(ctx, neighborCpos);
@@ -447,36 +448,22 @@ std::optional<Path> findPathSegment(Context& ctx, const NodePos& start, const No
     return bestPathSoFar(map, startNode, bestSoFar, startCenter, goalCenter);
 }
 
-// TODO: fix this lol
-const Chunk& getChunkNoMutex(const BlockPos& pos, const ChunkGeneratorHell& gen, ChunkGenExec& exec, cache_t& cache, Allocator<Chunk>& allocator) {
-    const ChunkPos chunkPos = pos.toChunkPos();
-    auto it = cache.find(chunkPos);
-    if (it != cache.end()) {
-        return *it->second.second;
-    } else {
-        Chunk* ptr = allocator.allocate();
-        auto& chunk = *ptr;
-        gen.generateChunk(chunkPos.x, chunkPos.z, *ptr, exec);
-        cache.emplace(chunkPos, std::pair{ChunkState::FAKE, ptr});
-        return chunk;
-    }
-}
-
 template<Size size>
-NodePos findAir(Context& ctx, const BlockPos& start1x) {
+std::optional<NodePos> findAir(Context& ctx, const BlockPos& start1x, FakeChunkMode fakeChunkMode) {
     auto start = NodePos{size, start1x};
     auto queue = std::queue<NodePos>{};
     auto visited = std::unordered_set<NodePos>{};
     queue.push(start);
     visited.insert(start);
-    if (!isInBounds(ctx.maxHeight, start1x)) goto retard;
+    if (!isInBounds(ctx.height, start1x)) return std::nullopt;
 
-    while (!queue.empty()) {
+    constexpr size_t MAX_VISITED_NODES = 4096;
+    while (!queue.empty() && visited.size() <= MAX_VISITED_NODES) {
         const NodePos node = queue.front();
         const auto blockPos = node.absolutePosZero();
         queue.pop();
-        if (isInBounds(ctx.maxHeight, node.absolutePosZero())) {
-            const auto& chunk = getChunkNoMutex(blockPos, ctx.generator, ctx.executors[0], ctx.chunkCache, *ctx.chunkAllocator);
+        if (isInBounds(ctx.height, node.absolutePosZero())) {
+            const auto& chunk = getRealChunkFromCacheOrFakeChunkMaybeGen(ctx, ctx.executors[0], blockPos.toChunkPos(), fakeChunkMode);
             if (chunk.isEmpty<size>(blockPos.x & 15, blockPos.y, blockPos.z & 15)) {
                 return node;
             }
@@ -492,14 +479,11 @@ NodePos findAir(Context& ctx, const BlockPos& start1x) {
             push(NodePos{size, blockPos.down(w)});
         }
     }
-    // shouldn't be possible to exit the while loop
-    retard:
-    std::cerr << "retard" << std::endl;
-    exit(1);
+    return std::nullopt;
 }
 
-template NodePos findAir<Size::X2>(Context& ctx, const BlockPos& start1x);
-template NodePos findAir<Size::X4>(Context& ctx, const BlockPos& start1x);
+template std::optional<NodePos> findAir<Size::X2>(Context& ctx, const BlockPos& start1x, FakeChunkMode fakeChunkMode);
+template std::optional<NodePos> findAir<Size::X4>(Context& ctx, const BlockPos& start1x, FakeChunkMode fakeChunkMode);
 
 
 void appendPath(Path& path, Path&& segment) {
@@ -519,7 +503,7 @@ Path splicePaths(std::vector<Path>&& paths) {
 }
 
 std::optional<Path> findPathFull(Context& ctx, const NodePos& start, const NodePos& goal, double fakeChunkCost) {
-    if (!isInBounds(ctx.maxHeight, start.absolutePosCenter())) throw "troll";
+    if (!isInBounds(ctx.height, start.absolutePosCenter())) return std::nullopt;
 
     std::vector<Path> segments;
 
@@ -527,8 +511,8 @@ std::optional<Path> findPathFull(Context& ctx, const NodePos& start, const NodeP
         const NodePos lastPathEnd = !segments.empty() ? NodePos{Size::X2, segments.back().getEndPos()} : start;
         std::optional path = findPathSegment(ctx, lastPathEnd, goal, true, 0, false, fakeChunkCost);
         if (!path.has_value()) {
-            if (cancelFlag.test()) {
-                cancelFlag.clear();
+            if (ctx.cancelFlag.test()) {
+                ctx.cancelFlag.clear();
                 return std::nullopt;
             } else {
                 break;
